@@ -19,11 +19,12 @@ use crate::library::Library;
 use crate::playlist::Playlist;
 use crate::queue::Queue;
 use crate::show::Show;
-use crate::spotify::{Spotify, URIType};
+use crate::spotify::{Spotify, UriType};
 use crate::track::Track;
 use crate::traits::{ListItem, ViewExt};
 use crate::ui::layout::Layout;
-use crate::ui::listview::{ListView, Pagination};
+use crate::ui::listview::ListView;
+use crate::ui::pagination::Pagination;
 use crate::ui::search_results::SearchResultsView;
 use crate::ui::tabview::TabView;
 use rspotify::model::search::SearchResult;
@@ -80,9 +81,11 @@ impl View for SearchView {
     }
 
     fn on_event(&mut self, event: Event) -> EventResult {
-        if event == Event::Key(Key::Esc) || event == Event::Key(Key::Tab) {
+        if event == Event::Key(Key::Tab) {
             self.edit_focused = !self.edit_focused;
             return EventResult::Consumed(None);
+        } else if self.edit_focused && event == Event::Key(Key::Esc) {
+            self.clear();
         }
 
         if self.edit_focused {

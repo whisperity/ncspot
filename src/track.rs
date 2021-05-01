@@ -29,6 +29,7 @@ pub struct Track {
     pub cover_url: Option<String>,
     pub url: String,
     pub added_at: Option<DateTime<Utc>>,
+    pub list_index: usize,
 }
 
 impl Track {
@@ -36,18 +37,17 @@ impl Track {
         let artists = track
             .artists
             .iter()
-            .map(|ref artist| artist.name.clone())
+            .map(|artist| artist.name.clone())
             .collect::<Vec<String>>();
         let artist_ids = track
             .artists
             .iter()
-            .filter(|a| a.id.is_some())
-            .map(|ref artist| artist.id.clone().unwrap())
+            .filter_map(|a| a.id.clone())
             .collect::<Vec<String>>();
         let album_artists = album
             .artists
             .iter()
-            .map(|ref artist| artist.name.clone())
+            .map(|artist| artist.name.clone())
             .collect::<Vec<String>>();
 
         Self {
@@ -65,6 +65,7 @@ impl Track {
             cover_url: album.images.get(0).map(|img| img.url.clone()),
             url: track.uri.clone(),
             added_at: None,
+            list_index: 0,
         }
     }
 
@@ -85,8 +86,7 @@ impl From<&SimplifiedTrack> for Track {
         let artist_ids = track
             .artists
             .iter()
-            .filter(|a| a.id.is_some())
-            .map(|ref artist| artist.id.clone().unwrap())
+            .filter_map(|a| a.id.clone())
             .collect::<Vec<String>>();
 
         Self {
@@ -104,6 +104,7 @@ impl From<&SimplifiedTrack> for Track {
             cover_url: None,
             url: track.uri.clone(),
             added_at: None,
+            list_index: 0,
         }
     }
 }
@@ -118,8 +119,7 @@ impl From<&FullTrack> for Track {
         let artist_ids = track
             .artists
             .iter()
-            .filter(|a| a.id.is_some())
-            .map(|ref artist| artist.id.clone().unwrap())
+            .filter_map(|a| a.id.clone())
             .collect::<Vec<String>>();
         let album_artists = track
             .album
@@ -143,6 +143,7 @@ impl From<&FullTrack> for Track {
             cover_url: track.album.images.get(0).map(|img| img.url.clone()),
             url: track.uri.clone(),
             added_at: None,
+            list_index: 0,
         }
     }
 }
@@ -241,7 +242,7 @@ impl ListItem for Track {
         None
     }
 
-    fn open_recommentations(
+    fn open_recommendations(
         &self,
         queue: Arc<Queue>,
         library: Arc<Library>,
@@ -250,7 +251,7 @@ impl ListItem for Track {
 
         let recommendations: Option<Vec<Track>> = if let Some(id) = &self.id {
             spotify
-                .recommentations(None, None, Some(vec![id.clone()]))
+                .recommendations(None, None, Some(vec![id.clone()]))
                 .map(|r| r.tracks)
                 .map(|tracks| tracks.iter().map(Track::from).collect())
         } else {
@@ -268,7 +269,7 @@ impl ListItem for Track {
                 self.artists.join(", "),
                 self.title
             ))
-            .as_boxed_view_ext()
+            .into_boxed_view_ext()
         })
     }
 

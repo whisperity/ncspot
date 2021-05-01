@@ -37,7 +37,7 @@ pub enum CommandResult {
 pub struct CommandManager {
     aliases: HashMap<String, String>,
     bindings: RefCell<HashMap<String, Command>>,
-    spotify: Arc<Spotify>,
+    spotify: Spotify,
     queue: Arc<Queue>,
     library: Arc<Library>,
     config: Arc<Config>,
@@ -46,7 +46,7 @@ pub struct CommandManager {
 
 impl CommandManager {
     pub fn new(
-        spotify: Arc<Spotify>,
+        spotify: Spotify,
         queue: Arc<Queue>,
         library: Arc<Library>,
         config: Arc<Config>,
@@ -106,6 +106,19 @@ impl CommandManager {
         match cmd {
             Command::Noop => Ok(None),
             Command::Quit => {
+                let queue = self.queue.queue.read().expect("can't readlock queue");
+                self.config.with_state_mut(move |mut s| {
+                    debug!(
+                        "saving state, {} items, current track: {:?}",
+                        queue.len(),
+                        self.queue.get_current_index()
+                    );
+                    s.queuestate.queue = queue.clone();
+                    s.queuestate.random_order = self.queue.get_random_order();
+                    s.queuestate.current_track = self.queue.get_current_index();
+                    s.queuestate.track_progress = self.spotify.get_current_progress();
+                });
+                self.config.save_state();
                 s.quit();
                 Ok(None)
             }
@@ -223,9 +236,19 @@ impl CommandManager {
                 s.call_on_name("main", |v: &mut Layout| {
                     v.set_screen("search");
                     if let Some(results) = view {
-                        v.push_view(results.as_boxed_view_ext())
+                        v.push_view(results.into_boxed_view_ext())
                     }
                 });
+                Ok(None)
+            }
+            Command::Logout => {
+                self.spotify.shutdown();
+
+                let mut credentials_path = crate::config::cache_path("librespot");
+                credentials_path.push("credentials.json");
+                std::fs::remove_file(credentials_path).unwrap();
+
+                s.quit();
                 Ok(None)
             }
             Command::Jump(_)
@@ -358,6 +381,8 @@ impl CommandManager {
         kb.insert("F1".into(), Command::Focus("queue".into()));
         kb.insert("F2".into(), Command::Focus("search".into()));
         kb.insert("F3".into(), Command::Focus("library".into()));
+        #[cfg(feature = "cover")]
+        kb.insert("F8".into(), Command::Focus("cover".into()));
         kb.insert("?".into(), Command::Help);
         kb.insert("Backspace".into(), Command::Back);
 

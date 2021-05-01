@@ -10,9 +10,7 @@ use cursive::{Cursive, Printer, Rect, Vec2};
 use unicode_width::UnicodeWidthStr;
 
 use crate::artist::Artist;
-use crate::command::{
-    Command, GotoMode, JumpMode, MoveAmount, MoveMode, SortDirection, SortKey, TargetMode,
-};
+use crate::command::{Command, GotoMode, JumpMode, MoveAmount, MoveMode, TargetMode};
 use crate::commands::CommandResult;
 use crate::episode::Episode;
 use crate::library::Library;
@@ -27,71 +25,8 @@ use crate::traits::{IntoBoxedViewExt, ListItem, ViewExt};
 use crate::ui::album::AlbumView;
 use crate::ui::artist::ArtistView;
 use crate::ui::contextmenu::ContextMenu;
-use crate::{album::Album, spotify::URIType, spotify_url::SpotifyURL};
-
-pub type Paginator<I> = Box<dyn Fn(Arc<RwLock<Vec<I>>>) + Send + Sync>;
-
-pub struct Pagination<I: ListItem> {
-    max_content: Arc<RwLock<Option<usize>>>,
-    callback: Arc<RwLock<Option<Paginator<I>>>>,
-    busy: Arc<RwLock<bool>>,
-}
-
-impl<I: ListItem> Default for Pagination<I> {
-    fn default() -> Self {
-        Pagination {
-            max_content: Arc::new(RwLock::new(None)),
-            callback: Arc::new(RwLock::new(None)),
-            busy: Arc::new(RwLock::new(false)),
-        }
-    }
-}
-
-// TODO: figure out why deriving Clone doesn't work
-impl<I: ListItem> Clone for Pagination<I> {
-    fn clone(&self) -> Self {
-        Pagination {
-            max_content: self.max_content.clone(),
-            callback: self.callback.clone(),
-            busy: self.busy.clone(),
-        }
-    }
-}
-
-impl<I: ListItem> Pagination<I> {
-    pub fn clear(&mut self) {
-        *self.max_content.write().unwrap() = None;
-        *self.callback.write().unwrap() = None;
-    }
-    pub fn set(&mut self, max_content: usize, callback: Paginator<I>) {
-        *self.max_content.write().unwrap() = Some(max_content);
-        *self.callback.write().unwrap() = Some(callback);
-    }
-
-    fn max_content(&self) -> Option<usize> {
-        *self.max_content.read().unwrap()
-    }
-
-    fn is_busy(&self) -> bool {
-        *self.busy.read().unwrap()
-    }
-
-    fn call(&self, content: &Arc<RwLock<Vec<I>>>) {
-        let pagination = self.clone();
-        let content = content.clone();
-        if !self.is_busy() {
-            *self.busy.write().unwrap() = true;
-            std::thread::spawn(move || {
-                let cb = pagination.callback.read().unwrap();
-                if let Some(ref cb) = *cb {
-                    debug!("calling paginator!");
-                    cb(content);
-                    *pagination.busy.write().unwrap() = false;
-                }
-            });
-        }
-    }
-}
+use crate::ui::pagination::Pagination;
+use crate::{album::Album, spotify::UriType, spotify_url::SpotifyUrl};
 
 pub struct ListView<I: ListItem> {
     content: Arc<RwLock<Vec<I>>>,
@@ -198,58 +133,6 @@ impl<I: ListItem> ListView<I> {
         let mut c = self.content.write().unwrap();
         c.remove(index);
     }
-
-    pub fn sort(&self, key: &SortKey, direction: &SortDirection) {
-        fn compare_artists(a: Vec<String>, b: Vec<String>) -> Ordering {
-            let sanitize_artists_name = |x: Vec<String>| -> Vec<String> {
-                x.iter()
-                    .map(|x| {
-                        x.to_lowercase()
-                            .split(' ')
-                            .skip_while(|x| x == &"the")
-                            .collect()
-                    })
-                    .collect()
-            };
-
-            let a = sanitize_artists_name(a);
-            let b = sanitize_artists_name(b);
-
-            a.cmp(&b)
-        }
-
-        let mut c = self.content.write().unwrap();
-
-        c.sort_by(|a, b| match (a.track(), b.track()) {
-            (Some(a), Some(b)) => match (key, direction) {
-                (SortKey::Title, SortDirection::Ascending) => {
-                    a.title.to_lowercase().cmp(&b.title.to_lowercase())
-                }
-                (SortKey::Title, SortDirection::Descending) => {
-                    b.title.to_lowercase().cmp(&a.title.to_lowercase())
-                }
-                (SortKey::Duration, SortDirection::Ascending) => a.duration.cmp(&b.duration),
-                (SortKey::Duration, SortDirection::Descending) => b.duration.cmp(&a.duration),
-                (SortKey::Album, SortDirection::Ascending) => a
-                    .album
-                    .map(|x| x.to_lowercase())
-                    .cmp(&b.album.map(|x| x.to_lowercase())),
-                (SortKey::Album, SortDirection::Descending) => b
-                    .album
-                    .map(|x| x.to_lowercase())
-                    .cmp(&a.album.map(|x| x.to_lowercase())),
-                (SortKey::Added, SortDirection::Ascending) => a.added_at.cmp(&b.added_at),
-                (SortKey::Added, SortDirection::Descending) => b.added_at.cmp(&a.added_at),
-                (SortKey::Artist, SortDirection::Ascending) => {
-                    compare_artists(a.artists, b.artists)
-                }
-                (SortKey::Artist, SortDirection::Descending) => {
-                    compare_artists(b.artists, a.artists)
-                }
-            },
-            _ => std::cmp::Ordering::Equal,
-        })
-    }
 }
 
 impl<I: ListItem> View for ListView<I> {
@@ -258,7 +141,7 @@ impl<I: ListItem> View for ListView<I> {
 
         self.scrollbar.draw(printer, |printer, i| {
             // draw paginator after content
-            if i == content.len() {
+            if i == content.len() && self.can_paginate() {
                 let style = ColorStyle::secondary();
 
                 let max = self.pagination.max_content().unwrap();
@@ -266,7 +149,7 @@ impl<I: ListItem> View for ListView<I> {
                 printer.with_color(style, |printer| {
                     printer.print((0, 0), &buf);
                 });
-            } else {
+            } else if i < content.len() {
                 let item = &content[i];
                 let currently_playing = item.is_playing(self.queue.clone())
                     && self.queue.get_current_index() == Some(i);
@@ -315,7 +198,7 @@ impl<I: ListItem> View for ListView<I> {
 
                     for m in matches {
                         printer.with_color(matched_style, |printer| {
-                            printer.print((m.0, 0), &left[m.0..m.1]);
+                            printer.print((left[0..m.0].width(), 0), &left[m.0..m.1]);
                         });
                     }
                 }
@@ -575,7 +458,7 @@ impl<I: ListItem + Clone> ViewExt for ListView<I> {
                         return Ok(CommandResult::Consumed(None));
                     }
                     MoveMode::Down if self.selected == last_idx && self.can_paginate() => {
-                        self.pagination.call(&self.content);
+                        self.pagination.call(&self.content, self.library.clone());
                     }
                     _ => {}
                 }
@@ -613,7 +496,7 @@ impl<I: ListItem + Clone> ViewExt for ListView<I> {
                         GotoMode::Album => {
                             if let Some(album) = item.album(queue.clone()) {
                                 let view =
-                                    AlbumView::new(queue, library, &album).as_boxed_view_ext();
+                                    AlbumView::new(queue, library, &album).into_boxed_view_ext();
                                 return Ok(CommandResult::View(view));
                             }
                         }
@@ -623,7 +506,7 @@ impl<I: ListItem + Clone> ViewExt for ListView<I> {
                                     0 => Ok(CommandResult::Consumed(None)),
                                     1 => {
                                         let view = ArtistView::new(queue, library, &artists[0])
-                                            .as_boxed_view_ext();
+                                            .into_boxed_view_ext();
                                         Ok(CommandResult::View(view))
                                     }
                                     _ => {
@@ -652,26 +535,26 @@ impl<I: ListItem + Clone> ViewExt for ListView<I> {
 
                 let spotify = self.queue.get_spotify();
 
-                let url = SpotifyURL::from_url(&url);
+                let url = SpotifyUrl::from_url(&url);
 
                 if let Some(url) = url {
                     let target: Option<Box<dyn ListItem>> = match url.uri_type {
-                        URIType::Track => spotify
+                        UriType::Track => spotify
                             .track(&url.id)
                             .map(|track| Track::from(&track).as_listitem()),
-                        URIType::Album => spotify
+                        UriType::Album => spotify
                             .album(&url.id)
                             .map(|album| Album::from(&album).as_listitem()),
-                        URIType::Playlist => spotify
+                        UriType::Playlist => spotify
                             .playlist(&url.id)
                             .map(|playlist| Playlist::from(&playlist).as_listitem()),
-                        URIType::Artist => spotify
+                        UriType::Artist => spotify
                             .artist(&url.id)
                             .map(|artist| Artist::from(&artist).as_listitem()),
-                        URIType::Episode => spotify
+                        UriType::Episode => spotify
                             .episode(&url.id)
                             .map(|episode| Episode::from(&episode).as_listitem()),
-                        URIType::Show => spotify
+                        UriType::Show => spotify
                             .get_show(&url.id)
                             .map(|show| Show::from(&show).as_listitem()),
                     };

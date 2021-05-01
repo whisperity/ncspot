@@ -8,11 +8,12 @@ use crate::library::Library;
 use crate::playlist::Playlist;
 use crate::queue::Queue;
 use crate::show::Show;
-use crate::spotify::{Spotify, URIType};
-use crate::spotify_url::SpotifyURL;
+use crate::spotify::{Spotify, UriType};
+use crate::spotify_url::SpotifyUrl;
 use crate::track::Track;
 use crate::traits::{ListItem, ViewExt};
-use crate::ui::listview::{ListView, Pagination};
+use crate::ui::listview::ListView;
+use crate::ui::pagination::Pagination;
 use crate::ui::tabview::TabView;
 use cursive::view::ViewWrapper;
 use cursive::Cursive;
@@ -35,12 +36,12 @@ pub struct SearchResultsView {
     results_episodes: Arc<RwLock<Vec<Episode>>>,
     pagination_episodes: Pagination<Episode>,
     tabs: TabView,
-    spotify: Arc<Spotify>,
+    spotify: Spotify,
     events: EventManager,
 }
 
 type SearchHandler<I> =
-    Box<dyn Fn(&Arc<Spotify>, &Arc<RwLock<Vec<I>>>, &str, usize, bool) -> u32 + Send + Sync>;
+    Box<dyn Fn(&Spotify, &Arc<RwLock<Vec<I>>>, &str, usize, bool) -> u32 + Send + Sync>;
 
 impl SearchResultsView {
     pub fn new(
@@ -102,7 +103,7 @@ impl SearchResultsView {
     }
 
     fn get_track(
-        spotify: &Arc<Spotify>,
+        spotify: &Spotify,
         tracks: &Arc<RwLock<Vec<Track>>>,
         query: &str,
         _offset: usize,
@@ -118,7 +119,7 @@ impl SearchResultsView {
     }
 
     fn search_track(
-        spotify: &Arc<Spotify>,
+        spotify: &Spotify,
         tracks: &Arc<RwLock<Vec<Track>>>,
         query: &str,
         offset: usize,
@@ -141,7 +142,7 @@ impl SearchResultsView {
     }
 
     fn get_album(
-        spotify: &Arc<Spotify>,
+        spotify: &Spotify,
         albums: &Arc<RwLock<Vec<Album>>>,
         query: &str,
         _offset: usize,
@@ -157,7 +158,7 @@ impl SearchResultsView {
     }
 
     fn search_album(
-        spotify: &Arc<Spotify>,
+        spotify: &Spotify,
         albums: &Arc<RwLock<Vec<Album>>>,
         query: &str,
         offset: usize,
@@ -180,7 +181,7 @@ impl SearchResultsView {
     }
 
     fn get_artist(
-        spotify: &Arc<Spotify>,
+        spotify: &Spotify,
         artists: &Arc<RwLock<Vec<Artist>>>,
         query: &str,
         _offset: usize,
@@ -196,7 +197,7 @@ impl SearchResultsView {
     }
 
     fn search_artist(
-        spotify: &Arc<Spotify>,
+        spotify: &Spotify,
         artists: &Arc<RwLock<Vec<Artist>>>,
         query: &str,
         offset: usize,
@@ -219,7 +220,7 @@ impl SearchResultsView {
     }
 
     fn get_playlist(
-        spotify: &Arc<Spotify>,
+        spotify: &Spotify,
         playlists: &Arc<RwLock<Vec<Playlist>>>,
         query: &str,
         _offset: usize,
@@ -235,7 +236,7 @@ impl SearchResultsView {
     }
 
     fn search_playlist(
-        spotify: &Arc<Spotify>,
+        spotify: &Spotify,
         playlists: &Arc<RwLock<Vec<Playlist>>>,
         query: &str,
         offset: usize,
@@ -258,7 +259,7 @@ impl SearchResultsView {
     }
 
     fn get_show(
-        spotify: &Arc<Spotify>,
+        spotify: &Spotify,
         shows: &Arc<RwLock<Vec<Show>>>,
         query: &str,
         _offset: usize,
@@ -274,7 +275,7 @@ impl SearchResultsView {
     }
 
     fn search_show(
-        spotify: &Arc<Spotify>,
+        spotify: &Spotify,
         shows: &Arc<RwLock<Vec<Show>>>,
         query: &str,
         offset: usize,
@@ -297,7 +298,7 @@ impl SearchResultsView {
     }
 
     fn get_episode(
-        spotify: &Arc<Spotify>,
+        spotify: &Spotify,
         episodes: &Arc<RwLock<Vec<Episode>>>,
         query: &str,
         _offset: usize,
@@ -313,7 +314,7 @@ impl SearchResultsView {
     }
 
     fn search_episode(
-        spotify: &Arc<Spotify>,
+        spotify: &Spotify,
         episodes: &Arc<RwLock<Vec<Episode>>>,
         query: &str,
         offset: usize,
@@ -380,9 +381,9 @@ impl SearchResultsView {
         self.spotify.refresh_token();
 
         // is the query a Spotify URI?
-        if let Some(uritype) = URIType::from_uri(&query) {
+        if let Some(uritype) = UriType::from_uri(&query) {
             match uritype {
-                URIType::Track => {
+                UriType::Track => {
                     self.perform_search(
                         Box::new(Self::get_track),
                         &self.results_tracks,
@@ -391,7 +392,7 @@ impl SearchResultsView {
                     );
                     self.tabs.move_focus_to(0);
                 }
-                URIType::Album => {
+                UriType::Album => {
                     self.perform_search(
                         Box::new(Self::get_album),
                         &self.results_albums,
@@ -400,7 +401,7 @@ impl SearchResultsView {
                     );
                     self.tabs.move_focus_to(1);
                 }
-                URIType::Artist => {
+                UriType::Artist => {
                     self.perform_search(
                         Box::new(Self::get_artist),
                         &self.results_artists,
@@ -409,7 +410,7 @@ impl SearchResultsView {
                     );
                     self.tabs.move_focus_to(2);
                 }
-                URIType::Playlist => {
+                UriType::Playlist => {
                     self.perform_search(
                         Box::new(Self::get_playlist),
                         &self.results_playlists,
@@ -418,7 +419,7 @@ impl SearchResultsView {
                     );
                     self.tabs.move_focus_to(3);
                 }
-                URIType::Show => {
+                UriType::Show => {
                     self.perform_search(
                         Box::new(Self::get_show),
                         &self.results_shows,
@@ -427,7 +428,7 @@ impl SearchResultsView {
                     );
                     self.tabs.move_focus_to(4);
                 }
-                URIType::Episode => {
+                UriType::Episode => {
                     self.perform_search(
                         Box::new(Self::get_episode),
                         &self.results_episodes,
@@ -439,9 +440,9 @@ impl SearchResultsView {
             }
         // Is the query a spotify URL?
         // https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC
-        } else if let Some(url) = SpotifyURL::from_url(&query) {
+        } else if let Some(url) = SpotifyUrl::from_url(&query) {
             match url.uri_type {
-                URIType::Track => {
+                UriType::Track => {
                     self.perform_search(
                         Box::new(Self::get_track),
                         &self.results_tracks,
@@ -450,7 +451,7 @@ impl SearchResultsView {
                     );
                     self.tabs.move_focus_to(0);
                 }
-                URIType::Album => {
+                UriType::Album => {
                     self.perform_search(
                         Box::new(Self::get_album),
                         &self.results_albums,
@@ -459,7 +460,7 @@ impl SearchResultsView {
                     );
                     self.tabs.move_focus_to(1);
                 }
-                URIType::Artist => {
+                UriType::Artist => {
                     self.perform_search(
                         Box::new(Self::get_artist),
                         &self.results_artists,
@@ -468,7 +469,7 @@ impl SearchResultsView {
                     );
                     self.tabs.move_focus_to(2);
                 }
-                URIType::Playlist => {
+                UriType::Playlist => {
                     self.perform_search(
                         Box::new(Self::get_playlist),
                         &self.results_playlists,
@@ -477,7 +478,7 @@ impl SearchResultsView {
                     );
                     self.tabs.move_focus_to(3);
                 }
-                URIType::Show => {
+                UriType::Show => {
                     self.perform_search(
                         Box::new(Self::get_show),
                         &self.results_shows,
@@ -486,7 +487,7 @@ impl SearchResultsView {
                     );
                     self.tabs.move_focus_to(4);
                 }
-                URIType::Episode => {
+                UriType::Episode => {
                     self.perform_search(
                         Box::new(Self::get_episode),
                         &self.results_episodes,

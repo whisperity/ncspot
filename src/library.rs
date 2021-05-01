@@ -5,7 +5,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, RwLock, RwLockReadGuard};
 use std::thread;
 
-use rspotify::model::playlist::SimplifiedPlaylist;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 
@@ -34,14 +33,17 @@ pub struct Library {
     pub shows: Arc<RwLock<Vec<Show>>>,
     pub is_done: Arc<RwLock<bool>>,
     pub user_id: Option<String>,
+    pub display_name: Option<String>,
     ev: EventManager,
-    spotify: Arc<Spotify>,
+    spotify: Spotify,
     pub cfg: Arc<Config>,
 }
 
 impl Library {
-    pub fn new(ev: &EventManager, spotify: Arc<Spotify>, cfg: Arc<Config>) -> Self {
-        let user_id = spotify.current_user().map(|u| u.id);
+    pub fn new(ev: &EventManager, spotify: Spotify, cfg: Arc<Config>) -> Self {
+        let current_user = spotify.current_user();
+        let user_id = current_user.as_ref().map(|u| u.id.clone());
+        let display_name = current_user.as_ref().and_then(|u| u.display_name.clone());
 
         let library = Self {
             tracks: Arc::new(RwLock::new(Vec::new())),
@@ -51,6 +53,7 @@ impl Library {
             shows: Arc::new(RwLock::new(Vec::new())),
             is_done: Arc::new(RwLock::new(false)),
             user_id,
+            display_name,
             ev: ev.clone(),
             spotify,
             cfg,
@@ -60,10 +63,8 @@ impl Library {
         library
     }
 
-    pub fn items(&self) -> RwLockReadGuard<Vec<Playlist>> {
-        self.playlists
-            .read()
-            .expect("could not readlock listview content")
+    pub fn playlists(&self) -> RwLockReadGuard<Vec<Playlist>> {
+        self.playlists.read().expect("can't readlock playlists")
     }
 
     fn load_cache<T: DeserializeOwned>(&self, cache_path: PathBuf, store: Arc<RwLock<Vec<T>>>) {
@@ -98,18 +99,12 @@ impl Library {
         }
     }
 
-    fn needs_download(&self, remote: &SimplifiedPlaylist) -> bool {
-        for local in self
-            .playlists
-            .read()
-            .expect("can't readlock playlists")
+    fn needs_download(&self, remote: &Playlist) -> bool {
+        self.playlists()
             .iter()
-        {
-            if local.id == remote.id {
-                return local.snapshot_id != remote.snapshot_id;
-            }
-        }
-        true
+            .find(|local| local.id == remote.id)
+            .map(|local| local.snapshot_id != remote.snapshot_id)
+            .unwrap_or(true)
     }
 
     fn append_or_update(&self, updated: &Playlist) -> usize {
@@ -259,9 +254,10 @@ impl Library {
         let mut stale_lists = self.playlists.read().unwrap().clone();
         let mut list_order = Vec::new();
 
-        let mut lists_result = self.spotify.current_user_playlist(50, 0);
-        while let Some(ref lists) = lists_result.clone() {
-            for (index, remote) in lists.items.iter().enumerate() {
+        let lists_page = self.spotify.current_user_playlist();
+        let mut lists_batch = Some(lists_page.items.read().unwrap().clone());
+        while let Some(lists) = &lists_batch {
+            for (index, remote) in lists.iter().enumerate() {
                 list_order.push(remote.id.clone());
 
                 // remove from stale playlists so we won't prune it later on
@@ -271,23 +267,15 @@ impl Library {
 
                 if self.needs_download(remote) {
                     info!("updating playlist {} (index: {})", remote.name, index);
-                    let mut playlist: Playlist = remote.into();
+                    let mut playlist: Playlist = remote.clone();
+                    playlist.tracks = None;
                     playlist.load_tracks(self.spotify.clone());
                     self.append_or_update(&playlist);
                     // trigger redraw
                     self.ev.trigger();
                 }
             }
-
-            // load next batch if necessary
-            lists_result = match lists.next {
-                Some(_) => {
-                    debug!("requesting playlists again..");
-                    self.spotify
-                        .current_user_playlist(50, lists.offset + lists.items.len() as u32)
-                }
-                None => None,
-            }
+            lists_batch = lists_page.next();
         }
 
         // remove stale playlists
@@ -550,13 +538,7 @@ impl Library {
         if api
             && self
                 .spotify
-                .current_user_saved_tracks_add(
-                    tracks
-                        .iter()
-                        .filter(|t| t.id.is_some())
-                        .map(|t| t.id.clone().unwrap())
-                        .collect(),
-                )
+                .current_user_saved_tracks_add(tracks.iter().filter_map(|t| t.id.clone()).collect())
                 .is_none()
         {
             return;
@@ -590,11 +572,7 @@ impl Library {
             && self
                 .spotify
                 .current_user_saved_tracks_delete(
-                    tracks
-                        .iter()
-                        .filter(|t| t.id.is_some())
-                        .map(|t| t.id.clone().unwrap())
-                        .collect(),
+                    tracks.iter().filter_map(|t| t.id.clone()).collect(),
                 )
                 .is_none()
         {
@@ -640,17 +618,11 @@ impl Library {
             }
         }
 
-        album.load_tracks(self.spotify.clone());
-
         {
             let mut store = self.albums.write().unwrap();
             if !store.iter().any(|a| a.id == album.id) {
                 store.insert(0, album.clone());
             }
-        }
-
-        if let Some(tracks) = album.tracks.as_ref() {
-            self.save_tracks(tracks.iter().collect(), false);
         }
 
         self.save_cache(config::cache_path(CACHE_ALBUMS), self.albums.clone());
@@ -671,15 +643,9 @@ impl Library {
             }
         }
 
-        album.load_tracks(self.spotify.clone());
-
         {
             let mut store = self.albums.write().unwrap();
             *store = store.iter().filter(|a| a.id != album.id).cloned().collect();
-        }
-
-        if let Some(tracks) = album.tracks.as_ref() {
-            self.unsave_tracks(tracks.iter().collect(), false);
         }
 
         self.save_cache(config::cache_path(CACHE_ALBUMS), self.albums.clone());

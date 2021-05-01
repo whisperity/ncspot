@@ -74,7 +74,7 @@ You can find it under `target/debian`.
 * Install the latest ncspot release using `cargo install ncspot`
   * or build it yourself using `cargo build --release`
   * both approaches require a working [Rust installation](https://www.rust-lang.org/tools/install)
-* For debugging, pass a debug log filename, e.g. `ncspot -d debug.log`
+* For debugging, you can pass a debug log filename and log stderr to a file, e.g. `RUST_BACKTRACE=full cargo run -- -d debug.log 2> stderr.log`
 
 ## Audio backends
 
@@ -101,6 +101,7 @@ depending on your desktop environment settings. Have a look at the
   * `F2`: Search
   * `F3`: Library
     * `d` deletes the currently selected playlist
+  * `F8`: Album art (if compiled with the `cover` feature)
 * Tracks and playlists can be played using `Return` and queued using `Space`
 * `.` will play the selected item after the currently playing track
 * `p` will move to the currently playing track in the queue
@@ -121,7 +122,7 @@ depending on your desktop environment settings. Have a look at the
 * `A` will open the artist view for the selected item
 * `Ctrl-v` will open the context menu for a Spotify link in your clipboard
 * `Backspace` closes the current view
-* `Shift-p` toggles playback of a track
+* `Shift-p` toggles playback of a track (play/pause)
 * `Shift-s` stops a track
 * `Shift-u` updates the library cache (tracks, artists, albums, playlists)
 * `<` and `>` play the previous or next track
@@ -189,6 +190,8 @@ Possible configuration values are:
 * `bitrate`: The audio bitrate to use for streaming, can be 96, 160, or 320 (default is 320)
 * `album_column`: Show album column for tracks, on by default <true/false>
 * `gapless`: Allows gapless playback <true/false> (default is false)
+* `shuffle`: Set default shuffle state <true/false>
+* `repeat`: Set default repeat mode <off/track/playlist>
 
 
 Keybindings can be configured in `[keybindings]` section in `config.toml`, e.g. as such:
@@ -202,23 +205,6 @@ See the help screen by pressing `?` for a list of possible commands.
 
 ncspot will respect system proxy settings defined via the `http_proxy`
 environment variable.
-
-### Initial state
-
-The initial state can be specified in the configuration.
-It allows for example enabling shuffle per default.
-Following entries can be added to the configuration file:
-
-```
-[saved_state]
-volume = 80
-repeat = "track"
-shuffle = true
-```
-
-- `volume` needs to be an integer value between 0 and 100
-- `repeat` can be `"track"`, `"playlist"` or any other value which defaults to no
-- `shuffle` must be `"true"` or `"false"`
 
 ### Theming
 
@@ -251,3 +237,13 @@ search_match = "light red"
 
 More examples can be found in pull request
 https://github.com/hrkfdn/ncspot/pull/40.
+
+### Cover Drawing
+
+When compiled with the `cover` feature, `ncspot` can draw the album art of the current track in a dedicated view (`:focus cover` or `F8` by default) using [Überzug](https://github.com/seebye/ueberzug). For more information on installation and terminal compatibility, consult that repository.
+
+To allow scaling the album art up beyond its resolution (640x640 for Spotify covers), use the config key `cover_max_scale`. This is especially useful for HiDPI displays:
+
+```
+cover_max_scale = 2
+```
